@@ -48,6 +48,7 @@ class SamAutomaticMaskGenerator:
         crop_n_points_downscale_factor: int = 1,
         point_grids: Optional[List[np.ndarray]] = None,
         min_mask_region_area: int = 0,
+        max_mask_region_area: int = 0,
         output_mode: str = "binary_mask",
     ) -> None:
         """
@@ -89,6 +90,8 @@ class SamAutomaticMaskGenerator:
           min_mask_region_area (int): If >0, postprocessing will be applied
             to remove disconnected regions and holes in masks with area smaller
             than min_mask_region_area. Requires opencv.
+          max_mask_region_area (int): If >0, postprocessing will be applied
+            to remove large masks, useful for removing unwanted background.
           output_mode (str): The form masks are returned in. Can be 'binary_mask',
             'uncompressed_rle', or 'coco_rle'. 'coco_rle' requires pycocotools.
             For large resolutions, 'binary_mask' may consume large amounts of
@@ -131,6 +134,7 @@ class SamAutomaticMaskGenerator:
         self.crop_overlap_ratio = crop_overlap_ratio
         self.crop_n_points_downscale_factor = crop_n_points_downscale_factor
         self.min_mask_region_area = min_mask_region_area
+        self.max_mask_region_area = max_mask_region_area
         self.output_mode = output_mode
 
     @torch.no_grad()
@@ -169,6 +173,17 @@ class SamAutomaticMaskGenerator:
                 self.min_mask_region_area,
                 max(self.box_nms_thresh, self.crop_nms_thresh),
             )
+
+        # Filter large masks by size (typically unnecessary background masks)
+        if self.max_mask_region_area > 0:
+            keep_mask = torch.tensor(
+                [
+                    sum(mask["counts"][1::2]) < self.max_mask_region_area
+                    for mask in mask_data["rles"]
+                ],
+                dtype=torch.bool,
+            )
+            mask_data.filter(keep_mask)
 
         # Encode masks
         if self.output_mode == "coco_rle":
